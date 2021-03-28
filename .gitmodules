@@ -1,0 +1,6 @@
+[submodule "maandlasten"]
+	path = maandlasten
+	url = git@github.com:tlaeven/maandlasten.git
+[submodule "mortgage"]
+	path = mortgage
+	url = git@github.com:jbmohler/mortgage.git
