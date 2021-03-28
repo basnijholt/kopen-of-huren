@@ -1,7 +1,8 @@
 from collections import defaultdict
 from functools import partial
 from itertools import product
-from typing import Dict
+from typing import Any, Dict, Literal, Union
+from numbers import Number
 
 import matplotlib
 import matplotlib.colors
@@ -17,7 +18,7 @@ from mortgage import Mortgage
 matplotlib.rc("font", size=15)
 
 
-def load_sp500():
+def load_sp500() -> pd.Series:
     # Daily data to need to resample it to quarterly like the huizenprijzen
     df_stock = pd.read_csv("sp500.csv")
     df_stock.Date = pd.to_datetime(df_stock.Date)
@@ -30,7 +31,7 @@ def load_sp500():
     return stock_price
 
 
-def plot_sp500():
+def plot_sp500() -> None:
     stock_price = load_sp500()
     stock_price.plot(
         xlabel="Datum",
@@ -41,7 +42,7 @@ def plot_sp500():
     plt.show()
 
 
-def get_groei():
+def get_groei() -> pd.DataFrame:
     stock_price = load_sp500()
     stock_price = stock_price[
         stock_price.index.day == 1
@@ -64,7 +65,7 @@ def get_groei():
     return groei
 
 
-def plot_aandelen(groei):
+def plot_aandelen(groei: pd.DataFrame) -> None:
     fig, ax = plt.subplots(figsize=(7, 7))
     groei.aandelen.plot(
         ax=ax,
@@ -96,7 +97,7 @@ def load_huizenprijzen():
     return huis_relative
 
 
-def plot_huizenprijzen(groei):
+def plot_huizenprijzen(groei: pd.DataFrame) -> None:
     fig, ax = plt.subplots(figsize=(7, 7))
     groei.huis.plot(
         ax=ax,
@@ -111,7 +112,7 @@ def plot_huizenprijzen(groei):
     plt.show()
 
 
-def plot_aandelen_en_huis(groei):
+def plot_aandelen_en_huis(groei: pd.DataFrame) -> None:
     fig, ax = plt.subplots(figsize=(8, 8))
     groei.aandelen[groei.huis.index].plot(ax=ax, label="Aandelen", legend=True)
     groei.huis.plot(ax=ax, label="Huizenprijs", legend=True)
@@ -123,7 +124,7 @@ def plot_aandelen_en_huis(groei):
     plt.show()
 
 
-def vergelijkings_tabel(groei):
+def vergelijkings_tabel(groei: pd.DataFrame):
     example_periods = [
         dict(van="2014-Q2", tot="2020-Q4", notities="de recente 'goede' jaren"),
         dict(
@@ -158,7 +159,7 @@ def vergelijkings_tabel(groei):
     return table
 
 
-def fill_area(x, ax, alpha=1):
+def fill_area(x: pd.Series, ax, alpha: float = 1.0) -> None:
     ax.fill_between(
         x.index,
         x.values,
@@ -178,12 +179,14 @@ def fill_area(x, ax, alpha=1):
     ax.hlines(0, x.index.min(), x.index.max(), ls="--", color="k")
 
 
-def maandelijke_groei(date, groei, which="huis"):
+def maandelijke_groei(
+    date: pd.Timestamp, groei: pd.DataFrame, which: Literal["huis", "aandelen"] = "huis"
+) -> float:
     pct = groei[which][groei.index == date].iloc[0] / 100
     return (1 + pct) ** (1 / 12)
 
 
-def bepaal_woz(huidige_prijs, date, groei):
+def bepaal_woz(huidige_prijs: float, date: pd.Timestamp, groei: pd.DataFrame):
     """WOZ waarde is bepaald aan de hand van de prijs van vorig jaar."""
     vorig_jaar = date.year - 1
     dates = groei.index[groei.index.year == vorig_jaar]
@@ -194,20 +197,22 @@ def bepaal_woz(huidige_prijs, date, groei):
     return prijs
 
 
-def aantal_jaar(dates):
+def aantal_jaar(dates: pd.DatetimeIndex):
     dt = dates.max() - dates.min()
     return dt.total_seconds() / 86400 / 365.25
 
 
-def maandelijks_onderhoud(huis_waarde, onderhoud_pct):
+def maandelijks_onderhoud(huis_waarde: float, onderhoud_pct: float = 2):
     return huis_waarde * onderhoud_pct / 100 / 12
 
 
-def vermogensbelasting(vermogen, schulden=0, getrouwd=True):
+def vermogensbelasting(
+    vermogen: float, schulden: float = 0, met_fiscaal_partner: bool = True
+):
     """Vermogensbelasting vanaf 2021.
     https://www.rijksoverheid.nl/onderwerpen/belastingplan/belastingwijzigingen-voor-ons-allemaal/box-3
     """
-    heffingvrij = 100_000 if getrouwd else 50_000
+    heffingvrij = 100_000 if met_fiscaal_partner else 50_000
     vermogen -= heffingvrij
     vermogen -= schulden
     if vermogen < 0:
@@ -233,17 +238,18 @@ def vermogensbelasting(vermogen, schulden=0, getrouwd=True):
 
 
 def koop_huis_of_beleg(
-    aankoop_datum,
-    jaar_tot_verkoop,
-    geleend,
-    groei,
-    huur=1000,
-    hypotheekrente=2.04,
-    hyptotheek_looptijd=30 * 12,
-    jaarinkomen=90_000,
-    schulden=20_000,
-    onderhoud_pct=1,
-    verbose=True,
+    aankoop_datum: Union[str, pd.Timestamp],
+    jaar_tot_verkoop: Number,
+    geleend: Number,
+    groei: pd.DataFrame,
+    huur: Number = 1000,
+    hypotheekrente: Number = 2.04,
+    hyptotheek_looptijd: int = 30 * 12,
+    jaarinkomen: Number = 90_000,
+    schulden: Number = 20_000,
+    onderhoud_pct: Number = 1,
+    met_fiscaal_partner: bool = True,
+    verbose: bool = True,
 ):
     dates = groei.index[groei.index >= aankoop_datum][
         : round(jaar_tot_verkoop * 12) + 1
@@ -279,7 +285,7 @@ def koop_huis_of_beleg(
         afgelost += float(afbetaling)
         if date.month == 1 and date.year > start_year:
             # Betaal vermogensbelasting over vorig jaar
-            belegging -= vermogensbelasting(belegging, schulden)
+            belegging -= vermogensbelasting(belegging, schulden, met_fiscaal_partner)
             # Krijg hypotheekrenteaftrek terug van vorig jaar!
             woz_waarde = bepaal_woz(huis_waarde, date, groei)
             hypotheek_aftrek = maandlasten.hypotheek_aftrek(
@@ -318,7 +324,7 @@ def koop_huis_of_beleg(
     )
 
 
-def run_monte_carlo(groei, parameters):
+def run_monte_carlo(groei: pd.DataFrame, parameters: Dict[str, Any]) -> pd.DataFrame:
     start_jaar = groei.index.year.min() + 1
     eind_jaar = groei.index.year.max()
     n_jaar = eind_jaar - start_jaar + 1
@@ -356,7 +362,7 @@ def run_monte_carlo(groei, parameters):
     return df
 
 
-def plot_result_scatter(df):
+def plot_result_scatter(df: pd.DataFrame) -> None:
     fig, ax = plt.subplots()
     df.plot.scatter(
         ax=ax,
@@ -386,7 +392,7 @@ def plot_result_scatter(df):
     plt.show()
 
 
-def plot_result_contour(df):
+def plot_result_contour(df: pd.DataFrame) -> None:
     ds = df.set_index(["aantal_jaar", "aankoop_datum"]).to_xarray()
     fig, axs = plt.subplots(ncols=2, nrows=2, figsize=(12, 8), sharex=True, sharey=True)
     levels = 15
@@ -443,13 +449,12 @@ def plot_result_contour(df):
     plt.show()
 
 
-def plot_result_lines(df):
+def plot_result_lines(df: pd.DataFrame) -> None:
     jaren = df.aantal_jaar.unique()[1::2]
     cmap = matplotlib.cm.get_cmap("tab20", len(jaren))
     color_map = dict(zip(sorted(jaren), cmap.colors))
 
     fig, ax = plt.subplots(figsize=(8, 8))
-    a, b = df.aantal_jaar.min(), df.aantal_jaar.max()
     for jaar in jaren:
         df[df.aantal_jaar == jaar].plot(
             x="aankoop_datum", y="verschil", ax=ax, color=color_map[jaar], legend=False
