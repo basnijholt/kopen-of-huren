@@ -1,19 +1,20 @@
 from collections import defaultdict
 from functools import partial
 from itertools import product
-from typing import Any, Dict, Literal, Union
 from numbers import Number
+from typing import Any, Dict, Literal, Union
 
 import matplotlib
 import matplotlib.colors
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy.optimize
 from loky import get_reusable_executor
 from tqdm.notebook import tqdm
 
 from maandlasten import maandlasten
-from mortgage import Mortgage
+from mortgage import Mortgage, dollar
 
 matplotlib.rc("font", size=15)
 
@@ -42,7 +43,7 @@ def plot_sp500() -> None:
     plt.show()
 
 
-def get_groei() -> pd.DataFrame:
+def get_groei(regio="Nederland") -> pd.DataFrame:
     stock_price = load_sp500()
     stock_price = stock_price[
         stock_price.index.day == 1
@@ -57,10 +58,11 @@ def get_groei() -> pd.DataFrame:
         stock_relative[date] = (value - prev) / prev * 100
     stock_relative = pd.Series(stock_relative)
     # Select at same dates as huis prijzen
-    huis_relative = load_huizenprijzen()
-    stock_relative = stock_relative[huis_relative.index]
+    huis_prijsindex = load_huizen_prijsindex_per_regio()[regio]
+
+    stock_relative = stock_relative[huis_prijsindex.index]
     groei = pd.concat(
-        [huis_relative, stock_relative], axis=1, keys=["huis", "aandelen"]
+        [huis_prijsindex, stock_relative], axis=1, keys=["huis", "aandelen"]
     )
     return groei
 
@@ -78,23 +80,21 @@ def plot_aandelen(groei: pd.DataFrame) -> None:
     plt.show()
 
 
-def load_huizenprijzen():
-    # Load the data
-    df_huis = pd.read_csv("huizenprijzen.csv", delimiter=";")
-    df_huis.Perioden = pd.to_datetime(
-        df_huis.Perioden.str.replace("e kwartaal", "").str.replace(" ", "-Q")
+def load_huizen_prijsindex_per_regio():
+    # Gedownload van https://opendata.cbs.nl/statline/#/CBS/nl/dataset/83913NED/table?ts=1617045165965
+    # Col: "Prijsindex bestaande koopwoningen Ontwikkeling t.o.v. een jaar eerder"
+    # met alle kwartaal data sinds 1996.
+    df = pd.read_csv("huizen_prijsindex_per_regio.csv")
+    df.Perioden = pd.to_datetime(
+        df.Perioden.str.replace("e kwartaal", "").str.replace(" ", "-Q")
     )
-    df_huis.set_index("Perioden", inplace=True)
+    df.set_index("Perioden", inplace=True)
+    for col in df.columns:
+        df[col] = df[col].str.replace(",", ".").astype(float)
 
-    # Interpolate to daily and than select first days of the month
-    huis_relative = (
-        df_huis["Prijsindex verkoopprijzen/Ontwikkeling  t.o.v. een jaar eerder (%)"]
-        .resample("D")
-        .interpolate()
-    )
-    huis_relative = huis_relative[huis_relative.index.day == 1]
-    huis_relative = huis_relative[~huis_relative.isna()]  # Drop NaNs
-    return huis_relative
+    df = df.resample("D").interpolate()
+    df = df[df.index.day == 1]
+    return df
 
 
 def plot_huizenprijzen(groei: pd.DataFrame) -> None:
@@ -338,7 +338,11 @@ def run_monte_carlo(groei: pd.DataFrame, parameters: Dict[str, Any]) -> pd.DataF
         aankoop_datum, jaar_tot_verkoop = datum_jaar
         try:
             return koop_huis_of_beleg(
-                aankoop_datum, jaar_tot_verkoop, groei=groei, **parameters
+                aankoop_datum,
+                jaar_tot_verkoop,
+                groei=groei,
+                verbose=False,
+                **parameters,
             )
         except ValueError:
             # 'jaar' is niet mogelijk want we kunnen niet in de toekomst kijken
@@ -473,3 +477,44 @@ def plot_result_lines(df: pd.DataFrame) -> None:
     ax.set_ylabel("Winst kopen huis t.o.v. beleggen")
     ax.set_title("Winst kopen huis t.o.v. beleggen")
     plt.show()
+
+
+def hyptotheek_van_huur(
+    huur: Number = 1000,
+    hypotheekrente: Number = 2.04,
+    hyptotheek_looptijd: int = 360,
+    onderhoud_pct: Number = 1,
+) -> float:
+    def hyptotheek_kosten(huis_prijs):
+        hyptotheek_maandelijks = Mortgage(
+            hypotheekrente / 100, hyptotheek_looptijd, dollar(float(huis_prijs))
+        ).monthly_payment()
+        onderhoud = onderhoud_pct / 100 * huis_prijs / 12
+        kosten = float(hyptotheek_maandelijks) + onderhoud
+        return kosten
+
+    res = scipy.optimize.minimize(
+        lambda huis_prijs: abs(hyptotheek_kosten(huis_prijs) - huur),
+        x0=100_000,
+        method="Nelder-Mead",
+        tol=1e-2,
+    )
+    return round(float(res.x), 2)
+
+
+def hyptotheek_maandlasten_df() -> pd.DataFrame:
+    bedragen = list(range(400, 2000, 100))
+    hyptoheek_hoogstes = [
+        hyptotheek_van_huur(
+            huur=huur,
+            hypotheekrente=2.04,
+            hyptotheek_looptijd=360,
+            onderhoud_pct=1,
+        )
+        for huur in bedragen
+    ]
+    hyptoheek_hoogstes = (np.array(hyptoheek_hoogstes) / 1000).round(1)
+
+    df = pd.DataFrame([bedragen, hyptoheek_hoogstes]).T
+    df.columns = ["maandlasten (€)", "hypotheek (x€1000)"]
+    return df

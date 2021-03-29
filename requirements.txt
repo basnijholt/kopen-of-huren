@@ -4,3 +4,4 @@ pandas
 loky
 tqdm
 xarray
+scipy
