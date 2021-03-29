@@ -518,3 +518,17 @@ def hyptotheek_maandlasten_df() -> pd.DataFrame:
     df = pd.DataFrame([bedragen, hyptoheek_hoogstes]).T
     df.columns = ["maandlasten (€)", "hypotheek (x€1000)"]
     return df
+
+
+def analyseer_data(df: pd.DataFrame) -> None:
+    pct_blauw = 100 * (df.verschil < 0).sum() / len(df.verschil)
+    print(
+        f"In {pct_blauw:.1f}% van alle gevallen is het beter om aandelen "
+        f"te kopen en in {100-pct_rood:.1f}% is het beter om een huis te kopen."
+    )
+    mean_beleggen = df.belegging[df.verschil < 0].mean() / 1000
+    mean_huis = df.huis_winst[df.verschil > 0].mean() / 1000
+    print(
+        f"In het geval dat aandelen beter waren, dan is de verwachte winst €{mean_beleggen:.1f}k."
+    )
+    print(f"Als een huis kopen beter was, dan is de verwachte winst €{mean_huis:.1f}k.")
